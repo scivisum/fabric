@@ -408,8 +408,7 @@ class TestExecute(FabricTest):
     @server(port=2200)
     @server(port=2201)
     def test_parallel_reporting_all_errors(self, fake_abort):
-        """
-        Parallel mode should still return values as in serial mode
+        """ Parallel mode should report errors on all hosts
         """
         fake_abort.expects_call().with_args(
             "One or more hosts failed while executing task 'task'\n\n"
@@ -424,6 +423,33 @@ class TestExecute(FabricTest):
             raise Exception("Failed")
         with hide('everything'):
             execute(task)
+
+    @patch("fabric.tasks.warn")
+    @server(port=2200)
+    @server(port=2201)
+    def test_parallel_reporting_all_network_errors_as_warnings(self, fake_warn):
+        """ Parallel mode should sometimes only warn on network failures
+        """
+
+        fabric.state.env.use_exceptions_for['network'] = False
+        fabric.state.env.skip_bad_hosts = True
+
+        # fake_warn.expects_call().with_args(
+        #     "One or more hosts failed while executing task 'task'\n\n"
+        #     "127.0.0.1:2201  Underlying exception:     Network Failed\n"
+        #     "127.0.0.1:2200  Underlying exception:     Network Failed\n\n"
+        #     "..........................."
+        # )
+
+        @parallel
+        @hosts('127.0.0.1:2200', '127.0.0.1:2201')
+        def task():
+            raise NetworkError("Network Failed")
+        with hide('everything'):
+            retval = execute(task)
+
+        eq_(type(retval['127.0.0.1:2200']), NetworkError)
+        eq_(type(retval['127.0.0.1:2201']), NetworkError)
 
     @with_fakes
     def test_should_work_with_Task_subclasses(self):
