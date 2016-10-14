@@ -403,13 +403,11 @@ def execute(task, *args, **kwargs):
         failed_messages = []
 
         def failed_instance(message):
+            # report each failure message as one line per host
             failed_messages.append(message.replace("\n", " "))
 
         # If running in parallel, block until job queue is emptied
         if jobs:
-            err = "One or more hosts failed while executing task '%s'" % (
-                my_env['command']
-            )
             jobs.close()
             # Abort if any children did not exit cleanly (fail-fast).
             # This prevents Fabric from continuing on to any other tasks.
@@ -417,6 +415,10 @@ def execute(task, *args, **kwargs):
             ran_jobs = jobs.run()
             for name, d in ran_jobs.iteritems():
                 if d['exit_code'] != 0:
+                    # TODO is this really required?
+                    # Network errors get suppressed at the end of _execute, so you should never get
+                    # a failure exit code caused by a NetworkError when NetworkError's are ignored.
+                    # Unittest test_parallel_reporting_all_network_errors_as_warnings reveals this.
                     if (
                         isinstance(d['results'], NetworkError) and
                         _is_network_error_ignored()
@@ -430,10 +432,21 @@ def execute(task, *args, **kwargs):
                         error(name, func=failed_instance, exception=d['results'])
                     else:
                         failed = True
-                        error(name + "experienced an unknown error", func=failed_instance)
+                        error(name + " experienced an unknown error", func=failed_instance)
                 results[name] = d['results']
-            if failed:
-                error(err + "\n\n" + "\n".join(failed_messages) + "\n\n...........................")
+
+            # If we need to report some failed messages
+            if failed_messages:
+                err = "One or more hosts failed while executing task '%s'" % (
+                    my_env['command']
+                )
+                # only warn if it is a suppressed network error
+                # otherwise error func will determine the severity of the error
+                error_func = None if failed else warn
+                error(
+                    err + "\n\n" + "\n".join(failed_messages) + "\n\n...........................",
+                    func=error_func
+                )
 
     # Or just run once for local-only
     else:
